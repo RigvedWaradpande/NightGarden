@@ -1,13 +1,9 @@
-// Construction: Base -> Derived
-// Destruction:  Derived -> Base
 ```
 
 ---
 
 ## **Night Garden Moving Parts**
 
-Let me map out the architecture so you can see the connections:
-```
 ┌─────────────────────────────────────────────────────────┐
 │                    TradingEngine                        │
 │  - Owns strategies (unique_ptr)                         │
@@ -47,3 +43,4 @@ Let me map out the architecture so you can see the connections:
 │  - low                                                  │
 │  - close                                                │
 └─────────────────────────────────────────────────────────┘
+```
