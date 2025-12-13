@@ -1,0 +1,2 @@
+curl -L -o AAPL.csv "https://query1.finance.yahoo.com/v7/finance/download/RELIANCE.BO?period1=0&period2=9999999999&interval=1d&events=history"
+curl -L -A "Mozilla/5.0" -o RELIANCE.csv "https://query1.finance.yahoo.com/v7/finance/download/AAPL?period1=0&period2=9999999999&interval=1d&events=history"
