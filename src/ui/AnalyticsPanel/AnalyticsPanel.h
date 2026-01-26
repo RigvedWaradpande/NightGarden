@@ -1,9 +1,6 @@
-#ifndef ANALYTICS_PANEL_H
-#define ANALYTICS_PANEL_H
+#pragma once
 
-class AnalyticsPanel{
-    public:
-        void Render(float left_panel_width, float bottom_height);
+class AnalyticsPanel {
+public:
+    void Render();
 };
-
-#endif

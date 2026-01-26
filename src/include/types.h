@@ -1,30 +1,42 @@
-#ifndef TYPES_H
-#define TYPES_H
-
+#pragma once
 #include <string>
-#include "imgui.h"
+#include <vector>
 
 struct Bar {
-    long timestamp;
+    int timestamp;
+    float open;
+    float high;
+    float low;
+    float close;
+    float volume;
     std::string date;
-    double open;
-    double high;
-    double low;
-    double close;
-    long volume;
 };
 
-struct PortfolioState {
-    double cash;
-    double equity;
-    int position;
-    double unrealized_pnl;
+struct Trade {
+    int timestamp;
+    enum Type { BUY, SELL } type;
+    float price;
+    int quantity;
+    float pnl;
 };
 
-enum class Signal {
+struct PerformanceMetrics {
+    float total_return;
+    float sharpe_ratio;
+    float max_drawdown;
+    float win_rate;
+    int num_trades;
+};
+
+enum Signal {
     BUY,
     SELL,
     HOLD
 };
 
-#endif
+struct PortfolioState {
+    float cash;
+    float equity;
+    int position;
+    float unrealized_pnl;
+};

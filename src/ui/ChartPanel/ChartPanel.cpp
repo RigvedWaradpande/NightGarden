@@ -1,164 +1,226 @@
 #include "ChartPanel.h"
-#include <iostream>
 #include "imgui.h"
+#include <algorithm>
+#include <iostream>
 
-void ChartPanel::Render(float left_panel_width, float bottom_height, DragState& g_drag_state) {
-    ImGuiIO& io = ImGui::GetIO();
-    
-    float candlestick_height = 300.0f;  // Fixed height for now
-    RenderCandlesticks(left_panel_width, candlestick_height);
-    
-    // Adjust remaining space for strategy tiles
-    float total_height = io.DisplaySize.y - 20 - bottom_height - candlestick_height;
-    int num_strategies = loaded_strategies.size();
-
-    // Always render at least one window for dropping
-    if (num_strategies == 0) {
-        ImGui::SetNextWindowPos(ImVec2(left_panel_width, 20 + candlestick_height)); // OFFSET HERE
-        ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - left_panel_width, total_height));
-        ImGui::Begin("Drop Zone", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
-        
-        if (g_drag_state.is_dragging) {
-            ImGui::Text("Dragging: %s", g_drag_state.strategy_name.c_str());
-            ImDrawList* draw_list = ImGui::GetWindowDrawList();
-            draw_list->AddCircleFilled(g_drag_state.drag_pos, 10.0f, IM_COL32(255, 0, 0, 255));
-        } else {
-            ImGui::Text("Drop strategy here to start backtest");
-        }
-        
-        // Handle drop
-        if (g_drag_state.is_dragging && ImGui::IsMouseReleased(0)) {
-            ImVec2 mouse = ImGui::GetMousePos();
-            ImVec2 panel_min = ImGui::GetWindowPos();
-            ImVec2 panel_max = ImVec2(panel_min.x + ImGui::GetWindowWidth(), 
-                                    panel_min.y + ImGui::GetWindowHeight());
-            
-            if (mouse.x >= panel_min.x && mouse.x <= panel_max.x &&
-                mouse.y >= panel_min.y && mouse.y <= panel_max.y) {
-                
-                std::cout << "DROPPED: " << g_drag_state.strategy_name << std::endl;
-                std::string plugin_path = "/Users/rigved/Programs/Night Garden/build/plugins/" + g_drag_state.strategy_name;
-                
-                PluginHandle handle = LoadStrategyPlugin(plugin_path);
-                if (handle.strategy) {
-                    std::unordered_map<std::string, std::string> params;
-                    params["fast_period"] = "10";
-                    params["slow_period"] = "50";
-                    handle.strategy->Initialise(params);
-                    
-                    BacktestEngine engine(*bars_ptr, 10000.0);
-                    engine.LoadStrategy(handle.strategy);
-                    engine.Run();
-                    
-                    StrategyResult result;
-                    result.name = g_drag_state.strategy_name;
-                    result.plugin = handle;
-                    result.equity_curve = engine.GetEquityCurve();
-                    loaded_strategies.push_back(result);
-                    
-                    std::cout << "Backtest complete, equity points: " << result.equity_curve.size() << std::endl;
-                }
-            }
-            g_drag_state.is_dragging = false;
-        }
-        
-        ImGui::End();
-        return;
-    }
-    
-    // Render tiles for each strategy
-    float tile_height = total_height / num_strategies;
-    
-    for (int i = 0; i < num_strategies; i++) {
-        
-        ImGui::SetNextWindowPos(ImVec2(left_panel_width, 20 + candlestick_height + i * tile_height)); // OFFSET HERE
-        ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - left_panel_width, tile_height));
-        
-        std::string window_name = loaded_strategies[i].name + "##" + std::to_string(i);
-        ImGui::Begin(window_name.c_str(), nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
-        
-        ImGui::Text("Strategy: %s", loaded_strategies[i].name.c_str());
-        
-        if (!loaded_strategies[i].equity_curve.empty()) {
-            ImGui::PlotLines(
-                "Equity",
-                loaded_strategies[i].equity_curve.data(),
-                loaded_strategies[i].equity_curve.size(),
-                0, nullptr, FLT_MAX, FLT_MAX,
-                ImVec2(0, tile_height - 80)
-            );
-        }
-        ImGui::End();
-    }
+void ChartPanel::SetBars(std::vector<Bar>* bars_ptr) {
+    this->bars = bars_ptr;
 }
 
-void ChartPanel::SetBars(std::vector<Bar>* bars) {
-    bars_ptr = bars;
+void ChartPanel::RenderMarketData(const std::vector<Bar>& bars) {
+    RenderCandlesticks(bars);
 }
 
-void ChartPanel::RenderCandlesticks(float left_panel_width, float window_height) {
-    if (!bars_ptr || bars_ptr->empty()) return;
-    
-    ImGuiIO& io = ImGui::GetIO();
-    ImGui::SetNextWindowPos(ImVec2(left_panel_width, 20));
-    ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x - left_panel_width, window_height));
-    ImGui::Begin("Market Data", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
-    
+void ChartPanel::RenderCandlesticks(const std::vector<Bar>& bars) {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
     ImVec2 canvas_size = ImGui::GetContentRegionAvail();
     
-    if (canvas_size.x <= 0 || canvas_size.y <= 0) {
-        ImGui::End();
+    if (bars.empty() || canvas_size.x <= 0 || canvas_size.y <= 0) {
+        ImGui::Text("No market data available");
         return;
     }
     
-    // Find price range
-    float price_min = (*bars_ptr)[0].low;
-    float price_max = (*bars_ptr)[0].high;
-    for (const auto& bar : *bars_ptr) {
-        if (bar.low < price_min) price_min = bar.low;
-        if (bar.high > price_max) price_max = bar.high;
+    // Find min/max prices for scaling
+    float max_price = bars[0].high;
+    float min_price = bars[0].low;
+    for (const auto& bar : bars) {
+        if (bar.high > max_price) max_price = bar.high;
+        if (bar.low < min_price) min_price = bar.low;
     }
-    float price_range = price_max - price_min;
-    if (price_range == 0) price_range = 1.0f;
+    float price_range = max_price - min_price;
+    if (price_range < 0.01f) price_range = 1.0f;
+    
+    // Draw background
+    draw_list->AddRectFilled(canvas_pos, 
+                            ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y),
+                            IM_COL32(20, 20, 20, 255));
     
     // Draw candlesticks
-    int num_bars = bars_ptr->size();
-    float x_step = canvas_size.x / num_bars;
-    
-    for (int i = 0; i < num_bars; i++) {
-        const Bar& bar = (*bars_ptr)[i];
+    float candle_width = canvas_size.x / bars.size();
+    for (size_t i = 0; i < bars.size(); i++) {
+        float x = canvas_pos.x + i * candle_width;
+        float open_y = canvas_pos.y + canvas_size.y - ((bars[i].open - min_price) / price_range) * canvas_size.y;
+        float close_y = canvas_pos.y + canvas_size.y - ((bars[i].close - min_price) / price_range) * canvas_size.y;
+        float high_y = canvas_pos.y + canvas_size.y - ((bars[i].high - min_price) / price_range) * canvas_size.y;
+        float low_y = canvas_pos.y + canvas_size.y - ((bars[i].low - min_price) / price_range) * canvas_size.y;
         
-        float x = canvas_pos.x + (i + 0.5f) * x_step;
+        bool is_green = bars[i].close >= bars[i].open;
+        ImU32 color = is_green ? IM_COL32(0, 200, 0, 255) : IM_COL32(200, 0, 0, 255);
         
-        // Scale to canvas (flip Y axis)
-        auto scale_y = [&](float price) {
-            return canvas_pos.y + canvas_size.y * (1.0f - (price - price_min) / price_range);
-        };
+        // Draw high-low line
+        draw_list->AddLine(ImVec2(x + candle_width/2, high_y), 
+                          ImVec2(x + candle_width/2, low_y), 
+                          color, 1.0f);
         
-        float y_high = scale_y(bar.high);
-        float y_low = scale_y(bar.low);
-        float y_open = scale_y(bar.open);
-        float y_close = scale_y(bar.close);
-        
-        // Wick (high-low line)
-        draw_list->AddLine(ImVec2(x, y_low), ImVec2(x, y_high), IM_COL32(150, 150, 150, 255), 1.0f);
-        
-        // Body
-        bool bullish = bar.close >= bar.open;
-        ImU32 color = bullish ? IM_COL32(0, 200, 0, 255) : IM_COL32(200, 0, 0, 255);
-        
-        float body_width = x_step * 0.6f;
-        float y_top = bullish ? y_close : y_open;
-        float y_bottom = bullish ? y_open : y_close;
-        
-        draw_list->AddRectFilled(
-            ImVec2(x - body_width/2, y_top),
-            ImVec2(x + body_width/2, y_bottom),
-            color
-        );
+        // Draw body
+        float body_top = is_green ? close_y : open_y;
+        float body_bottom = is_green ? open_y : close_y;
+        draw_list->AddRectFilled(ImVec2(x, body_top), 
+                                ImVec2(x + candle_width - 1, body_bottom), 
+                                color);
     }
     
-    ImGui::End();
+    // Labels
+    ImGui::SetCursorScreenPos(ImVec2(canvas_pos.x + 5, canvas_pos.y + 5));
+    ImGui::Text("High: %.2f", max_price);
+    ImGui::SetCursorScreenPos(ImVec2(canvas_pos.x + 5, canvas_pos.y + canvas_size.y - 20));
+    ImGui::Text("Low: %.2f", min_price);
+    
+    ImGui::Dummy(canvas_size);
+}
+
+void ChartPanel::RenderStrategyTab(size_t strategy_index) {
+    if (strategy_index >= loaded_strategies.size()) return;
+    
+    auto& strategy = loaded_strategies[strategy_index];
+    
+    // Toggle button
+    if (ImGui::Button(strategy.show_graph ? "Show Metrics" : "Show Graph")) {
+        strategy.show_graph = !strategy.show_graph;
+    }
+    
+    ImGui::Separator();
+    
+    if (strategy.show_graph) {
+        RenderEquityCurve(strategy.equity_curve);
+    } else {
+        RenderMetricsView(strategy.metrics);
+    }
+}
+
+void ChartPanel::RenderEquityCurve(const std::vector<float>& equity) {
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
+    ImVec2 canvas_size = ImGui::GetContentRegionAvail();
+    
+    if (equity.empty() || canvas_size.x <= 0 || canvas_size.y <= 0) {
+        ImGui::Text("No equity data to display");
+        return;
+    }
+    
+    // Find min/max for scaling
+    float max_val = *std::max_element(equity.begin(), equity.end());
+    float min_val = *std::min_element(equity.begin(), equity.end());
+    float range = max_val - min_val;
+    if (range < 0.01f) range = 1.0f;
+    
+    // Draw background
+    draw_list->AddRectFilled(canvas_pos, 
+                            ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y),
+                            IM_COL32(30, 30, 30, 255));
+    
+    // Draw starting capital line
+    float start_val = equity[0];
+    float start_y = canvas_pos.y + canvas_size.y - ((start_val - min_val) / range) * canvas_size.y;
+    draw_list->AddLine(ImVec2(canvas_pos.x, start_y),
+                      ImVec2(canvas_pos.x + canvas_size.x, start_y),
+                      IM_COL32(100, 100, 100, 128), 1.0f);
+    
+    // Draw equity curve
+    for (size_t i = 1; i < equity.size(); i++) {
+        float x1 = canvas_pos.x + ((i - 1) / (float)(equity.size() - 1)) * canvas_size.x;
+        float y1 = canvas_pos.y + canvas_size.y - ((equity[i-1] - min_val) / range) * canvas_size.y;
+        float x2 = canvas_pos.x + (i / (float)(equity.size() - 1)) * canvas_size.x;
+        float y2 = canvas_pos.y + canvas_size.y - ((equity[i] - min_val) / range) * canvas_size.y;
+        
+        ImU32 color = (equity[i] >= start_val) ? IM_COL32(0, 255, 0, 255) : IM_COL32(255, 0, 0, 255);
+        draw_list->AddLine(ImVec2(x1, y1), ImVec2(x2, y2), color, 2.0f);
+    }
+    
+    // Draw axis labels
+    ImGui::SetCursorScreenPos(ImVec2(canvas_pos.x + 5, canvas_pos.y + 5));
+    ImGui::Text("Max: $%.2f", max_val);
+    ImGui::SetCursorScreenPos(ImVec2(canvas_pos.x + 5, canvas_pos.y + canvas_size.y - 20));
+    ImGui::Text("Min: $%.2f", min_val);
+    
+    ImGui::Dummy(canvas_size);
+}
+
+void ChartPanel::RenderMetricsView(const PerformanceMetrics& metrics) {
+    ImGui::BeginChild("MetricsTable", ImVec2(0, 0), false);
+    
+    ImGui::Columns(2, "metrics_columns");
+    ImGui::Separator();
+    
+    ImGui::Text("Metric"); ImGui::NextColumn();
+    ImGui::Text("Value"); ImGui::NextColumn();
+    ImGui::Separator();
+    
+    // Total Return
+    ImGui::Text("Total Return"); ImGui::NextColumn();
+    ImU32 return_color = (metrics.total_return >= 0) ? IM_COL32(0, 255, 0, 255) : IM_COL32(255, 0, 0, 255);
+    ImGui::TextColored(ImColor(return_color), "%.2f%%", metrics.total_return * 100);
+    ImGui::NextColumn();
+    
+    // Sharpe Ratio
+    ImGui::Text("Sharpe Ratio"); ImGui::NextColumn();
+    ImGui::Text("%.2f", metrics.sharpe_ratio); ImGui::NextColumn();
+    
+    // Max Drawdown
+    ImGui::Text("Max Drawdown"); ImGui::NextColumn();
+    ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "%.2f%%", metrics.max_drawdown * 100);
+    ImGui::NextColumn();
+    
+    // Win Rate
+    ImGui::Text("Win Rate"); ImGui::NextColumn();
+    ImGui::Text("%.1f%%", metrics.win_rate * 100); ImGui::NextColumn();
+    
+    // Number of Trades
+    ImGui::Text("Total Trades"); ImGui::NextColumn();
+    ImGui::Text("%d", metrics.num_trades); ImGui::NextColumn();
+    
+    ImGui::Separator();
+    ImGui::Columns(1);
+    
+    ImGui::EndChild();
+}
+
+void ChartPanel::AddStrategy(const std::string& name, 
+                             const std::vector<float>& equity,
+                             const std::vector<Trade>& trades) {
+    LoadedStrategy strategy;
+    strategy.name = name;
+    strategy.equity_curve = equity;
+    strategy.trades = trades;
+    strategy.show_graph = true;
+    
+    // Calculate metrics
+    if (!equity.empty()) {
+        strategy.metrics.total_return = (equity.back() - equity.front()) / equity.front();
+        
+        // Calculate max drawdown
+        float peak = equity[0];
+        float max_dd = 0.0f;
+        for (float val : equity) {
+            if (val > peak) peak = val;
+            float dd = (peak - val) / peak;
+            if (dd > max_dd) max_dd = dd;
+        }
+        strategy.metrics.max_drawdown = max_dd;
+        
+        // TODO: Calculate Sharpe ratio (needs returns variance)
+        strategy.metrics.sharpe_ratio = 0.0f;
+        
+        // Calculate win rate
+        if (!trades.empty()) {
+            int wins = 0;
+            for (const auto& trade : trades) {
+                if (trade.pnl > 0) wins++;
+            }
+            strategy.metrics.win_rate = (float)wins / trades.size();
+        } else {
+            strategy.metrics.win_rate = 0.0f;
+        }
+        
+        strategy.metrics.num_trades = trades.size();
+    }
+    
+    loaded_strategies.push_back(strategy);
+}
+
+void ChartPanel::RemoveStrategy(size_t index) {
+    if (index < loaded_strategies.size()) {
+        loaded_strategies.erase(loaded_strategies.begin() + index);
+    }
 }

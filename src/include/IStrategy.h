@@ -3,10 +3,10 @@
 
 #include <unordered_map>
 #include <string>
+#include "types.h"
 
 struct Bar;
 struct PortfolioState;
-enum class Signal;
 
 class IStrategy{
 public:

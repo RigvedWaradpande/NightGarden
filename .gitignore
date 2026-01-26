@@ -2,6 +2,10 @@
 /build/
 build/
 
+# Ignore the venv
+/venv/
+venv/
+
 # CMake
 CMakeCache.txt
 CMakeFiles/

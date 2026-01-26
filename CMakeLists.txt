@@ -40,7 +40,9 @@ target_include_directories(nightgarden PRIVATE
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
     /opt/homebrew/include
-    .
+    ${CMAKE_SOURCE_DIR}/src/include
+    ${CMAKE_SOURCE_DIR}/src/ui
+    ${CMAKE_SOURCE_DIR}/src
 )
 
 target_link_libraries(nightgarden
